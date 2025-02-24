@@ -9,6 +9,8 @@ from aws_cdk import (
     aws_codepipeline_actions as codepipeline_actions,
     aws_iam as iam,
     aws_codedeploy as codedeploy,
+    aws_cloudwatch as cloudwatch,
+    Duration as duration
 )
 
 class PipelineCdkStack(Stack):
@@ -31,41 +33,41 @@ class PipelineCdkStack(Stack):
 
         code_quality_build = codebuild.PipelineProject(
             self, 'Code Quality',
-            build_spec = codebuild.BuildSpec.from_source_filename('./buildspec_test.yml'),
-            environment = codebuild.BuildEnvironment(
-                build_image = codebuild.LinuxBuildImage.STANDARD_5_0,
-                privileged = True,
-                compute_type = codebuild.ComputeType.LARGE,
+            build_spec=codebuild.BuildSpec.from_source_filename('./buildspec_test.yml'),
+            environment=codebuild.BuildEnvironment(
+                build_image=codebuild.LinuxBuildImage.STANDARD_5_0,
+                privileged=True,
+                compute_type=codebuild.ComputeType.LARGE,
             ),
         )
 
         docker_build_project = codebuild.PipelineProject(
             self, 'Docker Build',
-            build_spec = codebuild.BuildSpec.from_source_filename('./buildspec_docker.yml'),
-            environment = codebuild.BuildEnvironment(
-                build_image = codebuild.LinuxBuildImage.STANDARD_5_0,
-                privileged = True,
-                compute_type = codebuild.ComputeType.LARGE,
-                environment_variables = {
+            build_spec=codebuild.BuildSpec.from_source_filename('./buildspec_docker.yml'),
+            environment=codebuild.BuildEnvironment(
+                build_image=codebuild.LinuxBuildImage.STANDARD_5_0,
+                privileged=True,
+                compute_type=codebuild.ComputeType.LARGE,
+                environment_variables={
                     'IMAGE_TAG': codebuild.BuildEnvironmentVariable(
-                        type = codebuild.BuildEnvironmentVariableType.PLAINTEXT,
-                        value = 'latest'
+                        type=codebuild.BuildEnvironmentVariableType.PLAINTEXT,
+                        value='latest'
                     ),
                     'IMAGE_REPO_URI': codebuild.BuildEnvironmentVariable(
-                        type = codebuild.BuildEnvironmentVariableType.PLAINTEXT,
-                        value = ecr_repository.repository_uri
+                        type=codebuild.BuildEnvironmentVariableType.PLAINTEXT,
+                        value=ecr_repository.repository_uri
                     ),
                     'AWS_DEFAULT_REGION': codebuild.BuildEnvironmentVariable(
-                        type = codebuild.BuildEnvironmentVariableType.PLAINTEXT,
-                        value = os.environ['CDK_DEFAULT_REGION']
+                        type=codebuild.BuildEnvironmentVariableType.PLAINTEXT,
+                        value=os.environ['CDK_DEFAULT_REGION']
                     )
                 }
             ),
         )
 
         docker_build_project.add_to_role_policy(iam.PolicyStatement(
-            effect = iam.Effect.ALLOW,
-            actions = [
+            effect=iam.Effect.ALLOW,
+            actions=[
                 'ecr:GetAuthorizationToken',
                 'ecr:BatchCheckLayerAvailability',
                 'ecr:GetDownloadUrlForLayer',
@@ -79,7 +81,7 @@ class PipelineCdkStack(Stack):
                 'ecr:CompleteLayerUpload',
                 'ecr:PutImage'
             ],
-            resources = ['*'],
+            resources=['*'],
         ))
 
         source_output = codepipeline.Artifact()
@@ -102,75 +104,73 @@ class PipelineCdkStack(Stack):
         )
 
         build_action = codepipeline_actions.CodeBuildAction(
-            action_name = 'Unit-Test',
-            project = code_quality_build,
-            input = source_output,  # The build action must use the CodeStarConnectionsSourceAction output as input.
-            outputs = [unit_test_output]
+            action_name='Unit-Test',
+            project=code_quality_build,
+            input=source_output,
+            outputs=[unit_test_output]
         )
 
         pipeline.add_stage(
-            stage_name = 'Code-Quality-Testing',
-            actions = [build_action]
+            stage_name='Code-Quality-Testing',
+            actions=[build_action]
         )
 
         docker_build_action = codepipeline_actions.CodeBuildAction(
-            action_name = 'Docker-Build',
-            project = docker_build_project,
-            input = source_output,
-            outputs = [docker_build_output]
+            action_name='Docker-Build',
+            project=docker_build_project,
+            input=source_output,
+            outputs=[docker_build_output]
         )
 
         pipeline.add_stage(
-            stage_name = 'Docker-Push-ECR',
-            actions = [docker_build_action]
+            stage_name='Docker-Build',
+            actions=[docker_build_action]
         )
 
         pipeline.add_stage(
-            stage_name = 'Deploy-Test',
-            actions = [
+            stage_name='Deploy-Test',
+            actions=[
                 codepipeline_actions.EcsDeployAction(
-                    action_name = 'Deploy-Test',
-                    service = test_app_fargate.service,
-                    input = docker_build_output
+                    action_name='Deploy-Test',
+                    service=test_app_fargate.service,
+                    input=docker_build_output
                 )
             ]
         )
 
-        ecs_code_deploy_app = codedeploy.EcsApplication(
-            self, 'my-app',
-            application_name = 'my-app'
+        ecs_code_deploy_app = codedeploy.EcsApplication(self, "my-app",
+            application_name="my-app"
         )
 
-        prod_ecs_deployment_group = codedeploy.EcsDeploymentGroup(
-            self, 'my-app-dg',
-            service = prod_app_fargate.service,
-            blue_green_deployment_config = codedeploy.EcsBlueGreenDeploymentConfig(
-                blue_target_group = prod_app_fargate.target_group,
-                green_target_group = green_target_group,
-                listener = prod_app_fargate.listener,
-                test_listener = green_load_balancer_listener
+        prod_ecs_deployment_group = codedeploy.EcsDeploymentGroup(self, "my-app-dg",
+            service=prod_app_fargate.service,
+            blue_green_deployment_config=codedeploy.EcsBlueGreenDeploymentConfig(
+                blue_target_group=prod_app_fargate.target_group,
+                green_target_group=green_target_group,
+                listener=prod_app_fargate.listener,
+                test_listener=green_load_balancer_listener
             ),
-            deployment_config = codedeploy.EcsDeploymentConfig.LINEAR_10_PERCENT_EVERY_1_MINUTES,
-            application = ecs_code_deploy_app
-        )       
+            deployment_config=codedeploy.EcsDeploymentConfig.LINEAR_10_PERCENT_EVERY_1_MINUTES,
+            application=ecs_code_deploy_app
+        )
 
         pipeline.add_stage(
-            stage_name = 'Deploy-Production',
-            actions = [
+            stage_name='Deploy-Production',
+            actions=[
                 codepipeline_actions.ManualApprovalAction(
-                    action_name = 'Approve-Prod-Deploy',
-                    run_order = 1
-                ),
-                codepipeline_actions.CodeDeployEcsDeployAction(
-                    action_name = 'ABlueGreen-deployECS',
-                    deployment_group = prod_ecs_deployment_group,
-                    app_spec_template_input = source_output,
-                    task_definition_template_input = source_output,
-                    run_order = 2
-                )
+                action_name='Approve-Prod-Deploy',
+                run_order=1
+              ),
+              codepipeline_actions.CodeDeployEcsDeployAction(
+                  action_name='ABlueGreen-deployECS',
+                  deployment_group=prod_ecs_deployment_group,
+                  app_spec_template_input=source_output,
+                  task_definition_template_input=source_output,
+                  run_order=2
+              )
             ]
         )
-       
+
         CfnOutput(
             self, 'SourceConnectionArn',
             value = SourceConnection.attr_connection_arn
@@ -179,4 +179,35 @@ class PipelineCdkStack(Stack):
         CfnOutput(
             self, 'SourceConnectionStatus',
             value = SourceConnection.attr_connection_status
+        )
+
+        build_rate = cloudwatch.GraphWidget(
+          title="Build Successes and Failures",
+          width=6,
+          height=6,
+          view=cloudwatch.GraphWidgetView.PIE,
+          left=[
+              cloudwatch.Metric(
+                  namespace="AWS/CodeBuild",
+                  metric_name="SucceededBuilds",
+                  statistic='sum',
+                  label='Succeeded Builds',
+                  period=duration.days(30)
+              ),
+              cloudwatch.Metric(
+                  namespace="AWS/CodeBuild",
+                  metric_name="FailedBuilds",
+                  statistic='sum',
+                  label='Failed Builds',
+                  period=duration.days(30)
+              )
+          ]
+        )
+
+        dashboard = cloudwatch.Dashboard(
+          self, 'CICD_Dashboard',
+          dashboard_name='CICD_Dashboard',
+          widgets=[
+              [build_rate]
+          ]
         )
