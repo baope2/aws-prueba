@@ -41,8 +41,8 @@ class PipelineCdkStack(Stack):
 
         source_action = codepipeline_actions.CodeStarConnectionsSourceAction(
           action_name = 'GitHub',
-          owner = "aws-lab",
-          repo = "cicd-workshop",
+          owner = "baope2",
+          repo = "aws-prueba",
           output = source_output,
           branch = "main",
           trigger_on_push = True,
